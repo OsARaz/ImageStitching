@@ -11,6 +11,8 @@ In this project you are asked to implement image stitching procedure
 - Compute homography and filters the outliers 
 - Apply projection to stitch the image s
 '''
+
+
 class Stitcher:
     def __init__(self):
         # determine if we are using OpenCV v3.X
@@ -55,57 +57,23 @@ class Stitcher:
 
     def detectAndDescribe(self, image):
         # convert the image to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        keypoints, descriptors = self.describe(image, self.detect(image))
+        keypoints = np.float32([kp.pt for kp in keypoints])
+        return keypoints, descriptors
 
-        # check to see if we are using OpenCV 3.X
-        if self.isv3:
-            # detect and extract features from the image
-            descriptor = cv2.xfeatures2d.SIFT_create()
-            (kps, features) = descriptor.detectAndCompute(image, None)
+    def detect(self, image):
+        if not self.isv3:
+            raise RuntimeError("OpenCV version should be 3.X")
+        sift = cv2.xfeatures2d.SIFT_create()
+        keypoints = sift.detect(image)
+        return keypoints
 
-        # otherwise, we are using OpenCV 2.4.X
-        else:
-            # detect keypoints in the image
-            detector = cv2.FeatureDetector_create("SIFT")
-            kps = detector.detect(gray)
-
-            # extract features from the image
-            extractor = cv2.DescriptorExtractor_create("SIFT")
-            (kps, features) = extractor.compute(gray, kps)
-
-        # convert the keypoints from KeyPoint objects to NumPy
-        # arrays
-        kps = np.float32([kp.pt for kp in kps])
-
-        # return a tuple of keypoints and features
-        return (kps, features)
-
-    def detectAndDescribe(self, image):
-        # convert the image to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # check to see if we are using OpenCV 3.X
-        if self.isv3:
-            # detect and extract features from the image
-            descriptor = cv2.xfeatures2d.SIFT_create()
-            (kps, features) = descriptor.detectAndCompute(image, None)
-
-        # otherwise, we are using OpenCV 2.4.X
-        else:
-            # detect keypoints in the image
-            detector = cv2.FeatureDetector_create("SIFT")
-            kps = detector.detect(gray)
-
-            # extract features from the image
-            extractor = cv2.DescriptorExtractor_create("SIFT")
-            (kps, features) = extractor.compute(gray, kps)
-
-        # convert the keypoints from KeyPoint objects to NumPy
-        # arrays
-        kps = np.float32([kp.pt for kp in kps])
-
-        # return a tuple of keypoints and features
-        return (kps, features)
+    def describe(self, image, keypoints):
+        if not self.isv3:
+            raise RuntimeError("OpenCV version should be 3.X")
+        sift = cv2.xfeatures2d.SIFT_create()
+        matched_keypoints, descriptors = sift.compute(image, keypoints)
+        return matched_keypoints, descriptors
 
     def matchKeypoints(self, featuresA, featuresB):
         # compute the raw matches and initialize the list of actual
