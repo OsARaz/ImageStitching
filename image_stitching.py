@@ -76,20 +76,107 @@ class Stitcher:
         return matched_keypoints, descriptors
 
     def matchKeypoints(self, featuresA, featuresB):
-        # compute the raw matches and initialize the list of actual
-        # matches
-        matcher = cv2.DescriptorMatcher_create("BruteForce")
-        rawMatches = matcher.match(featuresA, featuresB)
-        matches = []
+        # matches1 = self.danielMatcher(featuresA,featuresB, method = "crossRef")
+        matches1 = self.danielMatcher(featuresA,featuresB, method = "bruteForce")
+        matches = matches1.tolist()
+        print("daniel finished")
+        if False:
+            # compute the raw matches and initialize the list of actual
+            # matches
+            matcher = cv2.DescriptorMatcher_create("BruteForce")
+            rawMatches = matcher.match(featuresA, featuresB)
+            matches = []
 
-        # loop over the raw matches
-        for m in rawMatches:
-            # ensure the distance is within a certain ratio of each
-            # other (i.e. Lowe's ratio test)
-            if True:
-                matches.append((m.trainIdx, m.queryIdx))
+            # loop over the raw matches
+            for m in rawMatches:
+                # ensure the distance is within a certain ratio of each
+                # other (i.e. Lowe's ratio test)
+                if True:
+                    matches.append((m.trainIdx, m.queryIdx))
+            # match_matches = (np.array(matches) == matches1)
+
+        print("matches length " + str(len(matches)))
 
         return matches
+
+    def danielMatcher(self, featuresA, featuresB ,method = "bruteForce", ptsA = None, ptsB = None):
+
+        # for A find best match in B by euclidean distance
+        if method == "bruteForce":
+            if len(featuresA) < len(featuresB):
+                matchesA, distA = self.findDist(featuresB, featuresA)
+            else:
+                matchesA, distA = self.findDist(featuresA, featuresB)
+            matchesB = distB = []
+
+        # crossRef from B to A
+        else: # method == "crossRef":
+            matchesA, distA = self.findDist(featuresA, featuresB)
+            matchesB, distB = self.findDist(featuresB, featuresA)
+
+        # find certainty by dividing with next best match
+        matchList, certainty = self.find_matches(matchesA, matchesB, distA, distB, method)
+        # remove matches by certainty
+        matchList,_ = self.decide_matches(matchList, certainty, cert_threshold=1.5)
+        # strengthen points by KNN
+        return matchList
+
+    def findDist(self, featA, featB, dist_threshold = 200000):
+        len(featA)
+        len(featB)
+        mtcA = []
+        distA = []
+        for i in range(len(featA)):
+            dist = [dist_threshold, dist_threshold]
+            mtc = [-1, -1]
+            for j in range(len(featB)):
+                temp = np.sum(np.power(featA[i]-featB[j], 2))
+                if temp < dist[0]:
+                    dist[1] = dist[0]
+                    mtc[1] = mtc[0]
+                    dist[0] = temp
+                    mtc[0] = j
+                elif temp < dist[1]:
+                    dist[1] = temp
+                    mtc[1] = j
+            mtcA.append(mtc)
+            distA.append(dist)
+        return mtcA, distA
+
+    def decide_matches(self, matchList, certainty, cert_threshold=0.5):
+        # find matches with certainty over threshold
+        mask = np.array(certainty) < cert_threshold
+        matchList = np.array(matchList)[mask]
+        certainty = np.array(certainty)[mask]
+
+        # sort matches
+        # idx = np.argsort(certainty)
+        # matchList = np.array(matchList)[idx]
+        # certainty = np.array(certainty)[idx]
+
+        return matchList, certainty
+
+    def find_matches(self, matchesA, matchesB, distA, distB, method):
+        matchList = []
+        certaintyList = []
+        # certainty = [-1, -1]
+        if method == "crossRef":
+            for i, match in enumerate(matchesA):
+                j1 = match[0]
+                # t = matchesB[j1][0]
+                if i == matchesB[j1][0]:
+                    matchList.append((i, j1))
+                    certainty1 = distA[i][0] / distA[i][1]
+                    certainty2 = distB[j1][0] / distB[j1][1]
+                    certainty = np.sqrt(certainty1 * certainty2)
+                    certaintyList.append(certainty)
+        else:
+            for i, match in enumerate(matchesA):
+                j1 = match[0]
+                matchList.append((i, j1))
+                certaintyList.append(distA[i][0] / distA[i][1])
+        return matchList, certaintyList
+
 
     def computeHomography(self, kpsA, kpsB, matches, reprojThresh):
 
@@ -131,20 +218,33 @@ class Stitcher:
         # return the visualization
         return vis
 
+# s = Stitcher()
+# matchList = [(1,1), (2,2), (3,3), (4,4)]
+# certainty = np.array([0,2,5,3])
+# s.decide_matches(matchList,certainty, 2.5)
 
-imageA = cv2.imread('A.jpg')
-imageB = cv2.imread('B.jpg')
 
-# stitch the images together to create a panorama
-stitcher = Stitcher()
-(result, vis) = stitcher.stitch([imageA, imageB], showMatches=True)
+if True:
+    imageA = cv2.imread('A.jpg')
+    imageB = cv2.imread('B.jpg')
 
-plt.figure()
-plt.imshow(imageA)
-plt.figure()
-plt.imshow(imageB)
-plt.figure()
-plt.imshow(vis)
-plt.figure()
-plt.imshow(result)
-plt.show()
+    # imageA = imageA[50:200, 250:500, :]
+    # imageB = imageB[80:230,:250, :]
+    # stitch the images together to create a panorama
+    stitcher = Stitcher()
+    (result, vis) = stitcher.stitch([imageA, imageB], showMatches=True)
+
+    plt.figure()
+    plt.imshow(imageA)
+    plt.figure()
+    plt.imshow(imageB)
+    plt.figure()
+    # plt.imshow(imageA1)
+    # plt.figure()
+    # plt.imshow(imageB1)
+    # plt.figure()
+
+    plt.imshow(vis)
+    plt.figure()
+    plt.imshow(result)
+    plt.show()
