@@ -1,4 +1,5 @@
 # import the necessary packages
+import scipy.signal
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -12,6 +13,8 @@ In this project you are asked to implement image stitching procedure
 - Compute homography and filters the outliers 
 - Apply projection to stitch the image s
 '''
+
+
 class Stitcher:
     def __init__(self):
         # determine if we are using OpenCV v3.X
@@ -97,37 +100,61 @@ class Stitcher:
     #     """
     #     s_points = sorted(points) # order points by x, then by y
 
+    @staticmethod
+    def shifted9(mat):
+        all_mat = [mat.copy() for _ in range(9)]
+        all_mat[0][1:, 1:] = mat[:-1, :-1]
+        all_mat[1][:, 1:] = mat[:, :-1]
+        all_mat[2][:-1, 1:] = mat[1:, :-1]
+        all_mat[3][1:, :] = mat[:-1, :]
+        all_mat[4][:, :] = mat[:, :]
+        all_mat[5][:-1, :] = mat[1:, :]
+        all_mat[6][1:, :-1] = mat[:-1, 1:]
+        all_mat[7][:, :-1] = mat[:, 1:]
+        all_mat[8][:-1, :-1] = mat[1:, 1:]
+        return all_mat
 
-
-
+    @classmethod
+    def sum9(cls, mat):
+        return np.sum(cls.shifted9(mat), axis=0)
 
     def detectAndDescribe(self, image):
         # convert the image to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        keypoints, descriptors = self.describe(image, self.detect(image))
+        keypoints = np.float32([kp.pt for kp in keypoints])
+        return keypoints, descriptors
 
-        # check to see if we are using OpenCV 3.X
-        if self.isv3:
-            # detect and extract features from the image
-            descriptor = cv2.xfeatures2d.SIFT_create()
-            (kps, features) = descriptor.detectAndCompute(image, None)
+    def detect(self, image):
+        """
+        Harris Corner Detector
+        :param image: RGB Matrix
+        :return: list of cv2.KeyPoint
+        """
+        K = 0.05
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float) / 255.
+        x_kernel = np.array([[-1, 0, 1]] * 3)
+        Ix = scipy.signal.convolve2d(gray, x_kernel, 'same')
+        Iy = scipy.signal.convolve2d(gray, x_kernel.T, 'same')
 
-        # otherwise, we are using OpenCV 2.4.X
-        else:
-            # detect keypoints in the image
-            detector = cv2.FeatureDetector_create("SIFT")
-            kps = detector.detect(gray)
+        MIxx = self.sum9(Ix ** 2)
+        MIyy = self.sum9(Iy ** 2)
+        MIxy = self.sum9(Ix * Iy)
 
-            # extract features from the image
-            extractor = cv2.DescriptorExtractor_create("SIFT")
-            (kps, features) = extractor.compute(gray, kps)
+        img_det = (MIxx * MIyy) - (MIxy * MIxy)
+        img_trace = MIxx + MIyy
 
-        # convert the keypoints from KeyPoint objects to NumPy
-        # arrays
-        kps = np.float32([kp.pt for kp in kps])
+        img_corners = (img_det - K * img_trace ** 2) > 0
+        np_keypoints = np.argwhere(img_corners)
+        np_keypoints = [np_keypoints[i] for i in xrange(0, len(np_keypoints), 20)]
+        keypoints = [cv2.KeyPoint(x, y, 30) for x, y in np_keypoints]
+        return keypoints
 
-        # return a tuple of keypoints and features
-        return (kps, features)
-
+    def describe(self, image, keypoints):
+        if not self.isv3:
+            raise RuntimeError("OpenCV version should be 3.X")
+        sift = cv2.xfeatures2d.SIFT_create()
+        matched_keypoints, descriptors = sift.compute(image, keypoints)
+        return matched_keypoints, descriptors
 
     def matchKeypoints(self, featuresA, featuresB):
         # compute the raw matches and initialize the list of actual
