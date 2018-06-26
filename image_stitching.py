@@ -2,6 +2,7 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import scipy.signal
 
 
 '''
@@ -11,8 +12,6 @@ In this project you are asked to implement image stitching procedure
 - Compute homography and filters the outliers 
 - Apply projection to stitch the image s
 '''
-
-
 class Stitcher:
     def __init__(self):
         # determine if we are using OpenCV v3.X
@@ -39,8 +38,9 @@ class Stitcher:
         # otherwise, apply a perspective warp to stitch the images
         # together
         (matches, H, status) = M
-        result = cv2.warpPerspective(imageA, H,
-                                     (imageA.shape[1] + imageB.shape[1], imageA.shape[0]))
+        # result = cv2.warpPerspective(imageA, H,
+        #                              (imageA.shape[1] + imageB.shape[1], imageA.shape[0]))
+        result = self.my_warp_perspective(imageA,H,(imageA.shape[1] + imageB.shape[1], imageA.shape[0]))
         result[0:imageB.shape[0], 0:imageB.shape[1]] = imageB
 
         # check to see if the keypoint matches should be visualized
@@ -55,142 +55,95 @@ class Stitcher:
         # return the stitched image
         return result
 
-    @staticmethod
-    def shifted9(mat):
-        all_mat = [mat.copy() for _ in range(9)]
-        all_mat[0][1:, 1:] = mat[:-1, :-1]
-        all_mat[1][:, 1:] = mat[:, :-1]
-        all_mat[2][:-1, 1:] = mat[1:, :-1]
-        all_mat[3][1:, :] = mat[:-1, :]
-        all_mat[4][:, :] = mat[:, :]
-        all_mat[5][:-1, :] = mat[1:, :]
-        all_mat[6][1:, :-1] = mat[:-1, 1:]
-        all_mat[7][:, :-1] = mat[:, 1:]
-        all_mat[8][:-1, :-1] = mat[1:, 1:]
-        return all_mat
+    def my_warp_perspective(self,imageA, H,dest_shape):
+        width,height = dest_shape
+        res = np.zeros((height,width,3)).astype(imageA.dtype)
+        a_rows,a_cols,_ = imageA.shape
+        index_mat = np.zeros((a_rows,a_cols,2))
+
+        x,y = np.meshgrid(range(a_cols),range(a_rows))
+        o = np.ones(x.shape)
+        src_vecs = np.array([np.reshape(x,[-1]),np.reshape(y,[-1]),np.reshape(o,[-1])])
+        mul_sum = np.dot(H,src_vecs)
+        dst_x = mul_sum[0,:] / mul_sum[2,:]
+        dst_y = mul_sum[1,:] / mul_sum[2,:]
+        dst_x = dst_x.reshape(a_rows,a_cols)
+        dst_y = dst_y.reshape(a_rows,a_cols)
+
+        dst_x = dst_x.astype(np.int)
+        dst_y = dst_y.astype(np.int)
+        ind = np.where((dst_x>=0) * (dst_y>=0))
+        res[dst_y[ind],dst_x[ind]]=imageA[y[ind],x[ind]]
+        # do conv with kernal of size 5
+        # kernel = np.array([0.05,0.25,0.4,0.25,0.05])
+        # res[:,:,0] = scipy.signal.convolve2d(res[:,:,0].reshape(height,width), kernel, 'same')
+        # res[:,:,1] = scipy.signal.convolve2d(res[:,:,1].reshape(height,width), kernel, 'same')
+        # res[:,:,2] = scipy.signal.convolve2d(res[:,:,2].reshape(height,width), kernel, 'same')
+
+        # cv2.imshow('check', res)
+        # cv2.waitKey()
+        return res
+
+    # def rgb_bilinear_interpolation(self,image):
+    #     rows,cols = image.shape
+    #
+    # def rgb_b_inter_helper(self,x,y,points):
+    #     """
+    #
+    #     :param x: the x value of the point to interpolate
+    #     :param y: the y value of the point
+    #     :param points: the neighbors points as array that each cell is list of [xi,yi,[r,g,b]]
+    #     :return: the r,g,b value s of the point
+    #     """
+    #     s_points = sorted(points) # order points by x, then by y
+
+
+
+
 
     def detectAndDescribe(self, image):
         # convert the image to grayscale
-        keypoints, descriptors = self.describe(image, self.detect(image))
-        keypoints = np.float32([kp.pt for kp in keypoints])
-        return keypoints, descriptors
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    def detect(self, image):
-        if not self.isv3:
-            raise RuntimeError("OpenCV version should be 3.X")
-        sift = cv2.xfeatures2d.SIFT_create()
-        keypoints = sift.detect(image)
-        return keypoints
+        # check to see if we are using OpenCV 3.X
+        if self.isv3:
+            # detect and extract features from the image
+            descriptor = cv2.xfeatures2d.SIFT_create()
+            (kps, features) = descriptor.detectAndCompute(image, None)
 
-    def describe(self, image, keypoints):
-        if not self.isv3:
-            raise RuntimeError("OpenCV version should be 3.X")
-        sift = cv2.xfeatures2d.SIFT_create()
-        matched_keypoints, descriptors = sift.compute(image, keypoints)
-        return matched_keypoints, descriptors
+        # otherwise, we are using OpenCV 2.4.X
+        else:
+            # detect keypoints in the image
+            detector = cv2.FeatureDetector_create("SIFT")
+            kps = detector.detect(gray)
+
+            # extract features from the image
+            extractor = cv2.DescriptorExtractor_create("SIFT")
+            (kps, features) = extractor.compute(gray, kps)
+
+        # convert the keypoints from KeyPoint objects to NumPy
+        # arrays
+        kps = np.float32([kp.pt for kp in kps])
+
+        # return a tuple of keypoints and features
+        return (kps, features)
+
 
     def matchKeypoints(self, featuresA, featuresB):
-        # matches1 = self.danielMatcher(featuresA,featuresB, method = "crossRef")
-        matches1 = self.danielMatcher(featuresA,featuresB, method = "bruteForce")
-        matches = matches1.tolist()
-        print("daniel finished")
-        if False:
-            # compute the raw matches and initialize the list of actual
-            # matches
-            matcher = cv2.DescriptorMatcher_create("BruteForce")
-            rawMatches = matcher.match(featuresA, featuresB)
-            matches = []
+        # compute the raw matches and initialize the list of actual
+        # matches
+        matcher = cv2.DescriptorMatcher_create("BruteForce")
+        rawMatches = matcher.match(featuresA, featuresB)
+        matches = []
 
-            # loop over the raw matches
-            for m in rawMatches:
-                # ensure the distance is within a certain ratio of each
-                # other (i.e. Lowe's ratio test)
-                if True:
-                    matches.append((m.trainIdx, m.queryIdx))
-            # match_matches = (np.array(matches) == matches1)
-
-        print("matches length " + str(len(matches)))
+        # loop over the raw matches
+        for m in rawMatches:
+            # ensure the distance is within a certain ratio of each
+            # other (i.e. Lowe's ratio test)
+            if True:
+                matches.append((m.trainIdx, m.queryIdx))
 
         return matches
-
-    def danielMatcher(self, featuresA, featuresB ,method = "bruteForce", ptsA = None, ptsB = None):
-
-        # for A find best match in B by euclidean distance
-        if method == "bruteForce":
-            if len(featuresA) < len(featuresB):
-                matchesA, distA = self.findDist(featuresB, featuresA)
-            else:
-                matchesA, distA = self.findDist(featuresA, featuresB)
-            matchesB = distB = []
-
-        # crossRef from B to A
-        else: # method == "crossRef":
-            matchesA, distA = self.findDist(featuresA, featuresB)
-            matchesB, distB = self.findDist(featuresB, featuresA)
-
-        # find certainty by dividing with next best match
-        matchList, certainty = self.find_matches(matchesA, matchesB, distA, distB, method)
-        # remove matches by certainty
-        matchList,_ = self.decide_matches(matchList, certainty, cert_threshold=1.5)
-        # strengthen points by KNN
-        return matchList
-
-    def findDist(self, featA, featB, dist_threshold = 200000):
-        len(featA)
-        len(featB)
-        mtcA = []
-        distA = []
-        for i in range(len(featA)):
-            dist = [dist_threshold, dist_threshold]
-            mtc = [-1, -1]
-            for j in range(len(featB)):
-                temp = np.sum(np.power(featA[i]-featB[j], 2))
-                if temp < dist[0]:
-                    dist[1] = dist[0]
-                    mtc[1] = mtc[0]
-                    dist[0] = temp
-                    mtc[0] = j
-                elif temp < dist[1]:
-                    dist[1] = temp
-                    mtc[1] = j
-            mtcA.append(mtc)
-            distA.append(dist)
-        return mtcA, distA
-
-    def decide_matches(self, matchList, certainty, cert_threshold=0.5):
-        # find matches with certainty over threshold
-        mask = np.array(certainty) < cert_threshold
-        matchList = np.array(matchList)[mask]
-        certainty = np.array(certainty)[mask]
-
-        # sort matches
-        # idx = np.argsort(certainty)
-        # matchList = np.array(matchList)[idx]
-        # certainty = np.array(certainty)[idx]
-
-        return matchList, certainty
-
-    def find_matches(self, matchesA, matchesB, distA, distB, method):
-        matchList = []
-        certaintyList = []
-        # certainty = [-1, -1]
-        if method == "crossRef":
-            for i, match in enumerate(matchesA):
-                j1 = match[0]
-                # t = matchesB[j1][0]
-                if i == matchesB[j1][0]:
-                    matchList.append((i, j1))
-                    certainty1 = distA[i][0] / distA[i][1]
-                    certainty2 = distB[j1][0] / distB[j1][1]
-                    certainty = np.sqrt(certainty1 * certainty2)
-                    certaintyList.append(certainty)
-        else:
-            for i, match in enumerate(matchesA):
-                j1 = match[0]
-                matchList.append((i, j1))
-                certaintyList.append(distA[i][0] / distA[i][1])
-        return matchList, certaintyList
-
 
     def computeHomography(self, kpsA, kpsB, matches, reprojThresh):
 
@@ -232,33 +185,20 @@ class Stitcher:
         # return the visualization
         return vis
 
-# s = Stitcher()
-# matchList = [(1,1), (2,2), (3,3), (4,4)]
-# certainty = np.array([0,2,5,3])
-# s.decide_matches(matchList,certainty, 2.5)
 
+imageA = cv2.imread('A.jpg')
+imageB = cv2.imread('B.jpg')
 
-if True:
-    imageA = cv2.imread('A.jpg')
-    imageB = cv2.imread('B.jpg')
+# stitch the images together to create a panorama
+stitcher = Stitcher()
+(result, vis) = stitcher.stitch([imageA, imageB], showMatches=True)
 
-    # imageA = imageA[50:200, 250:500, :]
-    # imageB = imageB[80:230,:250, :]
-    # stitch the images together to create a panorama
-    stitcher = Stitcher()
-    (result, vis) = stitcher.stitch([imageA, imageB], showMatches=True)
-
-    plt.figure()
-    plt.imshow(imageA)
-    plt.figure()
-    plt.imshow(imageB)
-    plt.figure()
-    # plt.imshow(imageA1)
-    # plt.figure()
-    # plt.imshow(imageB1)
-    # plt.figure()
-
-    plt.imshow(vis)
-    plt.figure()
-    plt.imshow(result)
-    plt.show()
+plt.figure()
+plt.imshow(imageA)
+plt.figure()
+plt.imshow(imageB)
+plt.figure()
+plt.imshow(vis)
+plt.figure()
+plt.imshow(result)
+plt.show()
