@@ -55,6 +55,20 @@ class Stitcher:
         # return the stitched image
         return result
 
+    @staticmethod
+    def shifted9(mat):
+        all_mat = [mat.copy() for _ in range(9)]
+        all_mat[0][1:, 1:] = mat[:-1, :-1]
+        all_mat[1][:, 1:] = mat[:, :-1]
+        all_mat[2][:-1, 1:] = mat[1:, :-1]
+        all_mat[3][1:, :] = mat[:-1, :]
+        all_mat[4][:, :] = mat[:, :]
+        all_mat[5][:-1, :] = mat[1:, :]
+        all_mat[6][1:, :-1] = mat[:-1, 1:]
+        all_mat[7][:, :-1] = mat[:, 1:]
+        all_mat[8][:-1, :-1] = mat[1:, 1:]
+        return all_mat
+
     def detectAndDescribe(self, image):
         # convert the image to grayscale
         keypoints, descriptors = self.describe(image, self.detect(image))
